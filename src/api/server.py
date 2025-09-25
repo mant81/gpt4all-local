@@ -1,29 +1,24 @@
-# src/api/server.py
 from fastapi import FastAPI
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-import torch
+from gpt4allj import Model  # 로컬 gpt4allj 설치 필요
 import json
+import os
 
-app = FastAPI(title="GPT4All-J FastAPI Server")
+app = FastAPI()
 
-# 모델과 토크나이저 로드
-MODEL_NAME = "nomic-ai/gpt4all-j"
-device = "cuda" if torch.cuda.is_available() else "cpu"
+MODEL_PATH = "models/ggml-gpt4all-j-v1.3-groovy.bin"
 
-print(f"모델 로딩 중... device={device}")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, device_map="auto" if device=="cuda" else None)
-generator = pipeline("text-generation", model=model, tokenizer=tokenizer, device=0 if device=="cuda" else -1)
-print("모델 로딩 완료!")
+# 모델 로드
+model = Model(MODEL_PATH)
+print("모델 로딩 완료")
 
 # JSON 문서 로드
-try:
-    with open("data/dev_docs.json", "r", encoding="utf-8") as f:
+DATA_PATH = "data/dev_docs.json"
+if os.path.exists(DATA_PATH):
+    with open(DATA_PATH, "r", encoding="utf-8") as f:
         dev_docs = json.load(f)
     print(f"문서 {len(dev_docs)}개 로딩 완료")
-except Exception as e:
-    print(f"문서 로딩 실패: {e}")
+else:
     dev_docs = []
 
 # 요청 Body 정의
@@ -31,19 +26,20 @@ class PromptRequest(BaseModel):
     prompt: str
 
 @app.post("/generate/")
-def generate(req: PromptRequest, max_tokens: int = 150):
-    # 문서 내용을 프롬프트에 포함
-    docs_text = "\n".join([f"Q: {doc['input']}\nA: {doc['output']}" for doc in dev_docs])
-    prompt = f"{docs_text}\n사용자 질문: {req.prompt}\n답변:"
+def generate(req: PromptRequest):
+    # 프롬프트 구성
+    context = "\n".join([f"Q: {doc['input']}\nA: {doc['output']}" for doc in dev_docs])
+    prompt = f"{context}\n\n사용자 질문: {req.prompt}\n답변:"
 
     try:
-        result = generator(prompt, max_new_tokens=max_tokens, do_sample=True, temperature=0.7)
-        answer = result[0]['generated_text'][len(prompt):].strip()
+        response = model.generate(prompt, max_tokens=300, temp=0.7)
+        if isinstance(response, bytes):
+            response = response.decode("utf-8", errors="ignore")
     except Exception as e:
-        answer = f"모델 생성 중 오류 발생: {e}"
+        response = f"모델 생성 중 오류 발생: {str(e)}"
 
-    return {"response": answer}
+    return {"response": response}
 
 @app.get("/")
 def root():
-    return {"message": "GPT4All-J FastAPI Server", "docs_count": len(dev_docs)}
+    return {"message": "로컬 GGML 기반 GPT4All-J 서버", "docs_count": len(dev_docs)}
