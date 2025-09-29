@@ -8,7 +8,7 @@ import time
 
 def test_qa():
     """Q&A 테스트"""
-    base_url = "http://localhost:8001"
+    base_url = "http://localhost:8000"
     
     # 테스트 질문들
     test_questions = [

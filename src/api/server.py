@@ -1,49 +1,37 @@
-# src/api/server.py
 from fastapi import FastAPI
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-import torch
-import json
+from gpt4all import GPT4All
 
-app = FastAPI(title="GPT4All-J FastAPI Server")
+app = FastAPI()
 
-# 모델과 토크나이저 로드
-MODEL_NAME = "nomic-ai/gpt4all-j"
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-print(f"모델 로딩 중... device={device}")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, device_map="auto" if device=="cuda" else None)
-generator = pipeline("text-generation", model=model, tokenizer=tokenizer, device=0 if device=="cuda" else -1)
-print("모델 로딩 완료!")
-
-# JSON 문서 로드
+# 로컬 GGML Lora 모델 경로
+MODEL_PATH = "models/gpt4all-falcon-newbpe-q4_0.gguf"
+MODEL_DIR = "models"
 try:
-    with open("data/dev_docs.json", "r", encoding="utf-8") as f:
-        dev_docs = json.load(f)
-    print(f"문서 {len(dev_docs)}개 로딩 완료")
+    # model_name: 식별용 이름 (로컬 경로도 가능)
+    # model_type: ggml
+    # allow_download=False 로 다운로드 방지
+    model = GPT4All(
+        model_name="gpt4all-falcon-newbpe-q4_0.gguf",  # 원하는 식별 이름
+        model_path=MODEL_DIR,
+        model_type="ggml",
+        allow_download=False
+    )
+    print("모델 로딩 완료")
 except Exception as e:
-    print(f"문서 로딩 실패: {e}")
-    dev_docs = []
+    model = None
+    print(f"모델 로딩 실패: {e}")
 
-# 요청 Body 정의
 class PromptRequest(BaseModel):
     prompt: str
 
 @app.post("/generate/")
-def generate(req: PromptRequest, max_tokens: int = 150):
-    # 문서 내용을 프롬프트에 포함
-    docs_text = "\n".join([f"Q: {doc['input']}\nA: {doc['output']}" for doc in dev_docs])
-    prompt = f"{docs_text}\n사용자 질문: {req.prompt}\n답변:"
-
-    try:
-        result = generator(prompt, max_new_tokens=max_tokens, do_sample=True, temperature=0.7)
-        answer = result[0]['generated_text'][len(prompt):].strip()
-    except Exception as e:
-        answer = f"모델 생성 중 오류 발생: {e}"
-
-    return {"response": answer}
+def generate(req: PromptRequest):
+    if model is None:
+        return {"response": "모델을 로드할 수 없습니다."}
+    response = model.generate("다음 질문에 반드시 한국어로만 답해:"+ req.prompt)
+    return {"response": response}
 
 @app.get("/")
 def root():
-    return {"message": "GPT4All-J FastAPI Server", "docs_count": len(dev_docs)}
+    return {"message": "GGML Lora 모델 기반 GPT4All API"}
